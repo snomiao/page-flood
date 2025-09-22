@@ -4,7 +4,7 @@
 // @match       http://*/*
 // @match       https://*/*
 // @grant       none
-// @version     2.0.0
+// @version     2.1.1
 // @author      snomiao@gmail.com
 // @description Press Shift+Alt+Q to batch open links in the main list in a page. Handy when you want to quick explore all google search results or visit all details pages in a list page.
 // ==/UserScript==
@@ -17,8 +17,10 @@
 // - pick the best group
 // - open links in the best group
 
-
 main();
+document.addEventListener("DOMContentLoaded", () => {
+  console.debug(getMainListLinks());
+});
 
 function main() {
   globalThis.PageFloodController?.abort();
@@ -32,7 +34,6 @@ function main() {
   );
 }
 async function openLinksInList() {
-  console.log(getMainListLinks());
   return await openLinks(getMainListLinks());
 }
 
@@ -43,72 +44,104 @@ async function openLinks(links) {
     Object.groupBy(links, (url, i) => String(Math.floor(i / 8)))
   );
   for await (const urls of urlss) {
+    const urlList = urls.join("\n");
+    const confirmMsg = `confirm to open ${urls.length} pages?\n\n${urlList}`;
+    if (!confirm(confirmMsg)) throw alert("cancelled by user");
     urls.toReversed().map(openDeduplicatedUrl);
     await new Promise((r) => setTimeout(r, 1e3)); // 1s cd
     await new Promise((r) =>
       document.addEventListener("visibilitychange", r, { once: true })
     ); // wait for page visible
   }
-  // await Promise.all(Object.entries(Object.groupBy(links, e => e.origin)).map(async ([origin, links]) => {
-  //   const urls = links.map(e => e.href)
-  //   const urlss = Object.values(Object.groupBy(urls, (url, i) => String(Math.floor(i / 8))))
-  //   for await (const urls of urlss) {
-  //     urls.toReversed().map(openUrl)
-  //     await new Promise(r => setTimeout(r, 1e3)) // 1s cd
-  //     await new Promise(r => document.addEventListener("visibilitychange", r, { once: true })) // wait for page visible
-  //   }
-  // }))
 }
 
 function openDeduplicatedUrl(url) {
   const opened = (globalThis.openDeduplicatedUrl_opened ??= new Set());
   return opened.has(url) || (window.open(url, "_blank") && opened.add(url));
 }
-console.log(getMainListLinks())
+
+function BagOfWordsModel() {
+  const wordSet = new Set();
+  return {
+    wordSet,
+    fit: (texts) => {
+      texts.forEach((text) =>
+        text
+          .toLowerCase()
+          .split(/\W+/)
+          .forEach((word) => wordSet.add(word))
+      );
+    },
+    transform: (text) => {
+      const words = text.toLowerCase().split(/\W+/);
+      const vec = Array.from(wordSet).map((word) =>
+        words.includes(word) ? 1 : 0
+      );
+      return vec;
+    },
+  };
+}
+
 function getMainListLinks() {
-  return [{ sel: "a" }]
-    .map((e) => ({ ...e, list: [...document.querySelectorAll(e.sel)] }))
-    .map((e) => ({
-      ...e,
-      vec: e.list.map((el) => [
-        elementDepth(el),
-        el.parentElement?.getBoundingClientRect().width,
-        el.parentElement?.getBoundingClientRect().height,
-      ]),
-    }))
-    .map((e) => ({ ...e, nor: normalize(e.vec) }))
-    .map((e) => ({ ...e, grp: groupByCosineSimilarity(e.nor, 0.99) }))
-    .map((e) => ({ ...e, grp: e.grp.map((g) => g.map((i) => e.list[i])) }))
-    .map((e) => ({
-      ...e,
-      grpWithArea: e.grp
-        .map((g) => ({
-          links: g,
-          area: area(maxRect(g.map((el) => el.getBoundingClientRect()))),
-          areaSum: g
-            .map((el) => area(el.getBoundingClientRect()))
-            .reduce((a, b) => a + b, 0),
-        }))
-        .map((g) => ({ ...g, score: Math.log(g.area * g.areaSum) }))
-        .toSorted(compareBy((g) => -g.score)),
-    }))
-    .map((e) => (console.log(e.grpWithArea), { ...e }))
-    .map((e) => ({
-      ...e,
-      _: e.grpWithArea
-        .slice(0, 1)
-        .map((grp, i, a) =>
-          grp.links.map((el) =>
-            flashColor(el, getOklch(i / a.length), 500 + (a.length - i) * 500)
-          )
+  // groupBy words and then return map
+  return (
+    [{ sel: "a" }]
+      .map((e) => ({ ...e, list: [...document.querySelectorAll(e.sel)] }))
+      .map((e) => ({
+        ...e,
+        bow: BagOfWordsModel(),
+      }))
+      .map((e) => ({
+        ...e,
+        _: e.bow.fit(
+          e.list.map((el) => el.className + " " + getElementAttributeNames(el))
         ),
-    }))
-    .map((e) =>
-      e.grpWithArea
-        .at(0)
-        .links.map(a=>a.href)
-    )
-    .at(0);
+      }))
+      .map((e) => ({
+        ...e,
+        vec: e.list.map((el, i) => [
+          elementDepth(el),
+          area(el.parentElement?.getBoundingClientRect()),
+          el.parentElement?.getBoundingClientRect().width,
+          el.parentElement?.getBoundingClientRect().height,
+          ...e.bow.transform(el.className + " " + getElementAttributeNames(el)),
+        ]),
+      }))
+      .map((e) => ({ ...e, nor: normalize(e.vec) }))
+      .map((e) => ({ ...e, vecGrp: groupByCosineSimilarity(e.nor, 0.99) }))
+      .map((e) => ({ ...e, grp: e.vecGrp.map((g) => g.map((i) => e.list[i])) }))
+      .map((e) => ({
+        ...e,
+        rank: e.grp
+          .map((g) => ({
+            links: g,
+            area: area(maxRect(g.map((el) => el.getBoundingClientRect()))),
+            areaSum: g
+              .map((el) => area(el.getBoundingClientRect()))
+              .reduce((a, b) => a + b, 0),
+          }))
+          .map((g) => ({ ...g, score: Math.log(g.area * g.areaSum) }))
+          .toSorted(compareBy((g) => -g.score)),
+      }))
+      .map((e) => ({
+        ...e,
+        _: e.rank
+          .slice(0, 1)
+          .map((grp, i, a) =>
+            grp.links.map((el) =>
+              flashBorder(
+                el,
+                getOklch(i / a.length),
+                500 + (a.length - i) * 500
+              )
+            )
+          ),
+      }))
+      // debug
+      .map((e) => (console.log(e), { ...e }))
+      .map((e) => e.rank.at(0).links.map((a) => a.href))
+      .at(0)
+  );
 }
 
 function getOklch(t) {
@@ -117,15 +150,10 @@ function getOklch(t) {
   const h = 360 * t;
   return `oklch(${l} ${c} ${h})`;
 }
-function flashColor(el, color, duration = 1000) {
-  const original = el.style.backgroundColor;
-  el.style.backgroundColor = color;
-  return {
-    el,
-    id: setTimeout(() => {
-      el.style.backgroundColor = original;
-    }, duration),
-  };
+function flashBorder(el, color, duration = 1000) {
+  const orig = el.style.outline;
+  el.style.outline = `3px solid ${color}`;
+  return setTimeout(() => (el.style.outline = orig), duration);
 }
 function compareBy(fn) {
   return (a, b) => fn(a) - fn(b);
@@ -176,4 +204,12 @@ function groupByCosineSimilarity(arr, threshold = 0.99) {
     groups.push(group);
   });
   return groups;
+}
+
+function getElementAttributeNames(el) {
+  if (!el) return "";
+  const attrs = Array.from(el.attributes || [])
+    .map((attr) => attr.name)
+    .join(" ");
+  return attrs;
 }
