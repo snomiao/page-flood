@@ -4,9 +4,11 @@
 // @match       http://*/*
 // @match       https://*/*
 // @grant       none
-// @version     2.1.1
+// @version     2.1.2
 // @author      snomiao@gmail.com
 // @description Press Shift+Alt+Q to batch open links in the main list in a page. Handy when you want to quick explore all google search results or visit all details pages in a list page.
+// @downloadURL https://update.greasyfork.org/scripts/528027/Page%20Flood.user.js
+// @updateURL   https://update.greasyfork.org/scripts/528027/Page%20Flood.meta.js
 // ==/UserScript==
 
 // - get all links
@@ -57,7 +59,11 @@ async function openLinks(links) {
 
 function openDeduplicatedUrl(url) {
   const opened = (globalThis.openDeduplicatedUrl_opened ??= new Set());
-  return opened.has(url) || (window.open(url, "_blank") && opened.add(url));
+  return opened.has(url) || (open(url, "_blank") && opened.add(url));
+}
+// robust open, works when window.open is blocked
+function open(href, target){
+  Object.assign(document.createElement('a'), {href, target}).click()
 }
 
 function BagOfWordsModel() {
