@@ -8,7 +8,7 @@
 // @author      snomiao@gmail.com
 // @description Press Shift+Alt+Q to batch open links in the main list in a page. Handy when you want to quick explore all google search results or visit all details pages in a list page.
 // @downloadURL https://update.greasyfork.org/scripts/528027/Page%20Flood.user.js
-// @updateURL   https://update.greasyfork.org/scripts/528027/Page%20Flood.meta.js
+// @updateURL https://update.greasyfork.org/scripts/528027/Page%20Flood.meta.js
 // ==/UserScript==
 
 // - get all links
@@ -19,15 +19,16 @@
 // - pick the best group
 // - open links in the best group
 
+let listIndex = 0
 main();
 document.addEventListener("DOMContentLoaded", () => {
-  console.debug(getMainListLinks());
+  console.debug(getNextListLinks());
 });
 
 function main() {
   globalThis.PageFloodController?.abort();
   const ac = (globalThis.PageFloodController = new AbortController());
-  window.addEventListener(
+  addEventListener(
     "keydown",
     async (e) => {
       if (e.shiftKey && e.altKey && e.code == "KeyQ") await openLinksInList();
@@ -36,7 +37,7 @@ function main() {
   );
 }
 async function openLinksInList() {
-  return await openLinks(getMainListLinks());
+  return await openLinks(getNextListLinks());
 }
 
 async function openLinks(links) {
@@ -88,7 +89,12 @@ function BagOfWordsModel() {
   };
 }
 
-function getMainListLinks() {
+function getNextListLinks() {
+  const ls =  getAllListLinks()
+  console.log(ls)
+  return ls.at(listIndex++)
+}
+function getAllListLinks(){
   // groupBy words and then return map
   return (
     [{ sel: "a" }]
@@ -145,7 +151,8 @@ function getMainListLinks() {
       }))
       // debug
       .map((e) => (console.log(e), { ...e }))
-      .map((e) => e.rank.at(0).links.map((a) => a.href))
+      // link lists
+      .map((e) => e.rank.map(({links})=>links.map((a) => a.href)))
       .at(0)
   );
 }
